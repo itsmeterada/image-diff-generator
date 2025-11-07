@@ -1,5 +1,7 @@
 # Image Difference Generator
 
+[English README](README.en.md)
+
 2枚の画像から差異を抽出して、差分をマスク画像として出力するPyQt6 GUIアプリケーションです。
 
 ![Screenshot](screenshot.png)
