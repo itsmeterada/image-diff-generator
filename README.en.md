@@ -12,8 +12,8 @@ This application compares two images, detects differences, and outputs the diffe
 
 ## Key Features
 
-### 🎨 Beautiful UI
-- Modern dark theme interface
+### 🎨 GUI
+- Dark theme interface
 - Intuitive operation
 - Real-time preview
 
