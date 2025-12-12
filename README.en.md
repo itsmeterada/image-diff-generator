@@ -149,7 +149,7 @@ python main.py
 
 1. Generate a mask (difference detection or SAM3)
 2. Check "Enable Edge Smoothing"
-3. Adjust strength with the Strength slider (1-50, higher = more blur)
+3. Adjust strength with the Strength slider (1-50, default: 3)
 4. Click save button to apply smoothing
 
 ### SAM3 Text Prompt Usage
@@ -157,16 +157,19 @@ python main.py
 1. **Load the model**:
    - Click "Load Model (GPU)" or "Load (CPU)" button
    - First-time loading will take time to download the model
+   - If SAM3 is not installed, click "Show Install Guide" for setup instructions
 
 2. **Load an image**:
    - Same as difference detection, load an image into Image 1 or Image 2
 
 3. **Enter text prompt**:
    - Enter objects to detect in the text input field
-   - Separate multiple objects with commas (e.g., `cat, dog, person`)
+   - Separate multiple objects with commas (e.g., `people, people shadow`)
+   - Default: `people, people shadow`
 
 4. **Select target image**:
    - Choose Image 1 or Image 2 from the "Apply to" dropdown
+   - Default: Image 2
 
 5. **Generate mask**:
    - Click the "Generate SAM3 Mask" button

@@ -358,10 +358,11 @@ class MainWindow(QMainWindow):
         model_btn_layout.addWidget(self.unload_model_btn)
         sam3_layout.addLayout(model_btn_layout)
 
-        # Install guide button
+        # Install guide button (hidden by default, shown only when SAM3 not installed)
         self.install_guide_btn = QPushButton("Show Install Guide")
         self.install_guide_btn.clicked.connect(self.show_sam3_install_instructions)
         self.install_guide_btn.setStyleSheet("background-color: #2196F3;")
+        self.install_guide_btn.hide()
         sam3_layout.addWidget(self.install_guide_btn)
 
         # Progress bar
@@ -375,6 +376,7 @@ class MainWindow(QMainWindow):
         prompt_layout = QHBoxLayout()
         prompt_label = QLabel("Text Prompt:")
         self.text_prompt_input = QLineEdit()
+        self.text_prompt_input.setText("people, people shadow")
         self.text_prompt_input.setPlaceholderText("e.g., cat, person, car (comma-separated)")
         self.text_prompt_input.returnPressed.connect(self.generate_sam3_mask)
         prompt_layout.addWidget(prompt_label)
@@ -401,6 +403,7 @@ class MainWindow(QMainWindow):
         target_label = QLabel("Apply to:")
         self.target_image_combo = QComboBox()
         self.target_image_combo.addItems(["Image 1", "Image 2"])
+        self.target_image_combo.setCurrentIndex(1)  # Default to Image 2
         target_layout.addWidget(target_label)
         target_layout.addWidget(self.target_image_combo)
         sam3_layout.addLayout(target_layout)
@@ -459,6 +462,7 @@ class MainWindow(QMainWindow):
 
         self.smoothing_checkbox = QCheckBox("Enable Edge Smoothing")
         self.smoothing_checkbox.setChecked(False)
+        self.smoothing_checkbox.setStyleSheet("QCheckBox { color: #ffffff; font-weight: bold; }")
         self.smoothing_checkbox.stateChanged.connect(self.on_smoothing_changed)
         smoothing_layout.addWidget(self.smoothing_checkbox)
 
@@ -466,10 +470,10 @@ class MainWindow(QMainWindow):
         smooth_strength_label = QLabel("Strength:")
         self.smoothing_slider = QSlider(Qt.Orientation.Horizontal)
         self.smoothing_slider.setRange(1, 50)
-        self.smoothing_slider.setValue(5)
+        self.smoothing_slider.setValue(3)
         self.smoothing_slider.setEnabled(False)
         self.smoothing_slider.valueChanged.connect(self.on_smoothing_changed)
-        self.smoothing_value_label = QLabel("5")
+        self.smoothing_value_label = QLabel("3")
         smooth_strength_layout.addWidget(smooth_strength_label)
         smooth_strength_layout.addWidget(self.smoothing_slider)
         smooth_strength_layout.addWidget(self.smoothing_value_label)
@@ -519,6 +523,7 @@ class MainWindow(QMainWindow):
             self.sam3_status_label.setText("Status: SAM3 available (model not loaded)")
             gpu_available, gpu_info = self.sam3_wrapper.check_gpu_available()
             self.gpu_info_label.setText(gpu_info)
+            self.install_guide_btn.hide()
             if not gpu_available:
                 self.load_model_btn.setEnabled(False)
         else:
@@ -532,6 +537,7 @@ class MainWindow(QMainWindow):
             self.load_model_cpu_btn.setEnabled(False)
             self.sam3_generate_btn.setEnabled(False)
             self.gpu_info_label.setText("Click 'Show Install Guide' for setup instructions")
+            self.install_guide_btn.show()
 
     def show_sam3_install_instructions(self):
         """Show SAM3 installation instructions in a dialog."""
