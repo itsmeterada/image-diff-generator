@@ -45,6 +45,13 @@
 - アルファチャンネル付きで出力
 - 差分がある部分は不透明（白）、ない部分は透明として保存
 
+### 🤖 SAM3テキストプロンプトセグメンテーション
+- **SAM3 (Segment Anything Model 3)** によるテキストベースのセグメンテーション
+- テキストで指定したオブジェクトを自動検出してマスク生成
+- カンマ区切りで複数のプロンプトに対応（例: `cat, dog, person`）
+- GPU/CPU両対応
+- 検出閾値の調整機能
+
 ## インストール
 
 ### 必要環境
@@ -68,6 +75,35 @@ pip install -r requirements.txt
 - `PyQt6` (>= 6.6.0): GUIフレームワーク
 - `opencv-python` (>= 4.8.0): 画像処理
 - `numpy` (>= 1.24.0): 数値演算
+
+### SAM3のインストール（オプション）
+
+SAM3テキストプロンプト機能を使用する場合は、追加のセットアップが必要です:
+
+1. **Python 3.12環境を作成**（SAM3はPython 3.13非対応）:
+```bash
+conda create -n sam3 python=3.12
+conda activate sam3
+```
+
+2. **PyTorchをインストール**:
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+3. **SAM3をクローンしてインストール**:
+```bash
+git clone https://github.com/facebookresearch/sam3.git
+cd sam3
+pip install -e .
+```
+
+4. **Hugging Faceにログイン**（モデルダウンロードに必要）:
+```bash
+huggingface-cli login
+```
+
+> **注意**: SAM3モデルへのアクセスはHugging Faceで事前にリクエストする必要があります。
 
 ## 使い方
 
@@ -98,6 +134,30 @@ python main.py
    - 「Save Mask Image」ボタンをクリック
    - 保存先とファイル名を指定
    - PNG形式でアルファチャンネル付きマスクが保存されます
+
+### SAM3テキストプロンプトの使い方
+
+1. **モデルをロード**:
+   - 「Load Model (GPU)」または「Load (CPU)」ボタンをクリック
+   - 初回はモデルのダウンロードに時間がかかります
+
+2. **画像を読み込む**:
+   - 差分検出と同様に、Image 1またはImage 2に画像を読み込みます
+
+3. **テキストプロンプトを入力**:
+   - テキスト入力フィールドに検出したいオブジェクトを入力
+   - 複数のオブジェクトはカンマで区切る（例: `cat, dog, person`）
+
+4. **対象画像を選択**:
+   - 「Apply to」ドロップダウンでImage 1またはImage 2を選択
+
+5. **マスクを生成**:
+   - 「Generate SAM3 Mask」ボタンをクリック
+   - 検出結果がプレビューに表示されます
+
+6. **閾値を調整**（オプション）:
+   - Thresholdスライダーで検出感度を調整（0.0〜1.0）
+   - 値を下げると検出対象が増え、上げると確実性の高いものだけが検出されます
 
 ### 使用例
 
@@ -149,8 +209,10 @@ python main.py
 ```
 image-diff-generator/
 ├── main.py              # メインアプリケーション
+├── sam3_wrapper.py      # SAM3ラッパーモジュール
 ├── requirements.txt     # Python依存パッケージ
-└── README.md           # このファイル
+├── README.md           # このファイル（日本語）
+└── README.en.md        # 英語版README
 ```
 
 ## コードの主要クラス
@@ -169,6 +231,12 @@ image-diff-generator/
 - アプリケーションのメインウィンドウ
 - UI構築と画像処理ロジックを統合
 - イベント処理とファイルI/O
+
+### `SAM3Wrapper`
+- SAM3モデルのラッパークラス
+- モデルのロード/アンロード機能
+- テキストプロンプトによるマスク生成
+- Windows環境でのtriton互換性対応
 
 ## カスタマイズ
 

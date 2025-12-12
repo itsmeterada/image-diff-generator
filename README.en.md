@@ -45,6 +45,13 @@ Display images in 3 layers (Image 1 → Image 2 → Mask):
 - Output with alpha channel
 - Opaque (white) where differences exist, transparent where none
 
+### 🤖 SAM3 Text Prompt Segmentation
+- **SAM3 (Segment Anything Model 3)** text-based segmentation
+- Automatically detect and mask objects specified by text
+- Support for multiple comma-separated prompts (e.g., `cat, dog, person`)
+- GPU/CPU support
+- Adjustable detection threshold
+
 ## Installation
 
 ### Requirements
@@ -68,6 +75,35 @@ Required packages:
 - `PyQt6` (>= 6.6.0): GUI framework
 - `opencv-python` (>= 4.8.0): Image processing
 - `numpy` (>= 1.24.0): Numerical operations
+
+### SAM3 Installation (Optional)
+
+Additional setup is required to use the SAM3 text prompt feature:
+
+1. **Create Python 3.12 environment** (SAM3 doesn't support Python 3.13):
+```bash
+conda create -n sam3 python=3.12
+conda activate sam3
+```
+
+2. **Install PyTorch**:
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+3. **Clone and install SAM3**:
+```bash
+git clone https://github.com/facebookresearch/sam3.git
+cd sam3
+pip install -e .
+```
+
+4. **Login to Hugging Face** (required for model download):
+```bash
+huggingface-cli login
+```
+
+> **Note**: You need to request access to the SAM3 model on Hugging Face beforehand.
 
 ## Usage
 
@@ -98,6 +134,30 @@ python main.py
    - Click the "Save Mask Image" button
    - Specify the save destination and filename
    - The mask will be saved in PNG format with alpha channel
+
+### SAM3 Text Prompt Usage
+
+1. **Load the model**:
+   - Click "Load Model (GPU)" or "Load (CPU)" button
+   - First-time loading will take time to download the model
+
+2. **Load an image**:
+   - Same as difference detection, load an image into Image 1 or Image 2
+
+3. **Enter text prompt**:
+   - Enter objects to detect in the text input field
+   - Separate multiple objects with commas (e.g., `cat, dog, person`)
+
+4. **Select target image**:
+   - Choose Image 1 or Image 2 from the "Apply to" dropdown
+
+5. **Generate mask**:
+   - Click the "Generate SAM3 Mask" button
+   - Detection results will be displayed in the preview
+
+6. **Adjust threshold** (optional):
+   - Use the Threshold slider to adjust detection sensitivity (0.0-1.0)
+   - Lower values detect more objects, higher values only detect high-confidence matches
 
 ### Use Cases
 
@@ -149,6 +209,7 @@ python main.py
 ```
 image-diff-generator/
 ├── main.py              # Main application
+├── sam3_wrapper.py      # SAM3 wrapper module
 ├── requirements.txt     # Python dependencies
 ├── README.md           # Japanese README
 └── README.en.md        # This file (English README)
@@ -170,6 +231,12 @@ image-diff-generator/
 - Main application window
 - Integrates UI construction and image processing logic
 - Event handling and file I/O
+
+### `SAM3Wrapper`
+- Wrapper class for SAM3 model
+- Model loading/unloading functionality
+- Text prompt-based mask generation
+- Windows triton compatibility support
 
 ## Customization
 
