@@ -44,6 +44,12 @@ Display images in 3 layers (Image 1 → Image 2 → Mask):
 - Save mask image in PNG format
 - Output with alpha channel
 - Opaque (white) where differences exist, transparent where none
+- **Image 2 + Mask Alpha Save**: Save Image 2 with mask applied as alpha channel
+
+### ✨ Edge Smoothing
+- Gaussian blur to smooth mask edges
+- Toggle on/off
+- Adjustable strength slider (1-50)
 
 ### 🤖 SAM3 Text Prompt Segmentation
 - **SAM3 (Segment Anything Model 3)** text-based segmentation
@@ -134,6 +140,17 @@ python main.py
    - Click the "Save Mask Image" button
    - Specify the save destination and filename
    - The mask will be saved in PNG format with alpha channel
+
+6. **Save Image 2 with mask applied** (optional):
+   - Click the "Save Image 2 with Mask Alpha" button
+   - Saves a PNG image with Image 2's RGB + mask as alpha channel
+
+### Edge Smoothing Usage
+
+1. Generate a mask (difference detection or SAM3)
+2. Check "Enable Edge Smoothing"
+3. Adjust strength with the Strength slider (1-50, higher = more blur)
+4. Click save button to apply smoothing
 
 ### SAM3 Text Prompt Usage
 

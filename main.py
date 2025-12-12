@@ -5,7 +5,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QSlider, QPushButton, QFileDialog,
                              QGroupBox, QSplitter, QLineEdit, QComboBox, QProgressBar,
-                             QMessageBox, QTabWidget, QDialog, QTextEdit)
+                             QMessageBox, QTabWidget, QDialog, QTextEdit, QCheckBox)
 from PyQt6.QtCore import Qt, QRect, pyqtSignal, QThread
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QDragEnterEvent, QDropEvent
 
@@ -453,11 +453,45 @@ class MainWindow(QMainWindow):
         controls_group.setLayout(controls_layout)
         left_layout.addWidget(controls_group)
 
-        # Save button
+        # Edge smoothing controls
+        smoothing_group = QGroupBox("Mask Edge Smoothing")
+        smoothing_layout = QVBoxLayout()
+
+        self.smoothing_checkbox = QCheckBox("Enable Edge Smoothing")
+        self.smoothing_checkbox.setChecked(False)
+        self.smoothing_checkbox.stateChanged.connect(self.on_smoothing_changed)
+        smoothing_layout.addWidget(self.smoothing_checkbox)
+
+        smooth_strength_layout = QHBoxLayout()
+        smooth_strength_label = QLabel("Strength:")
+        self.smoothing_slider = QSlider(Qt.Orientation.Horizontal)
+        self.smoothing_slider.setRange(1, 50)
+        self.smoothing_slider.setValue(5)
+        self.smoothing_slider.setEnabled(False)
+        self.smoothing_slider.valueChanged.connect(self.on_smoothing_changed)
+        self.smoothing_value_label = QLabel("5")
+        smooth_strength_layout.addWidget(smooth_strength_label)
+        smooth_strength_layout.addWidget(self.smoothing_slider)
+        smooth_strength_layout.addWidget(self.smoothing_value_label)
+        smoothing_layout.addLayout(smooth_strength_layout)
+
+        smoothing_group.setLayout(smoothing_layout)
+        left_layout.addWidget(smoothing_group)
+
+        # Save buttons
+        save_btn_layout = QVBoxLayout()
+
         self.save_btn = QPushButton("Save Mask Image")
         self.save_btn.clicked.connect(self.save_mask)
         self.save_btn.setEnabled(False)
-        left_layout.addWidget(self.save_btn)
+        save_btn_layout.addWidget(self.save_btn)
+
+        self.save_with_alpha_btn = QPushButton("Save Image 2 with Mask Alpha")
+        self.save_with_alpha_btn.clicked.connect(self.save_image_with_mask_alpha)
+        self.save_with_alpha_btn.setEnabled(False)
+        save_btn_layout.addWidget(self.save_with_alpha_btn)
+
+        left_layout.addLayout(save_btn_layout)
 
         left_layout.addStretch()
 
@@ -679,6 +713,7 @@ class MainWindow(QMainWindow):
             self.viewer.display_image(overlay)
 
         self.save_btn.setEnabled(True)
+        self.save_with_alpha_btn.setEnabled(True)
 
     def browse_image1(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -754,6 +789,7 @@ class MainWindow(QMainWindow):
         self.viewer.set_images(img1_resized, img2_resized, self.mask)
 
         self.save_btn.setEnabled(True)
+        self.save_with_alpha_btn.setEnabled(True)
 
     def update_alpha1_2(self, value):
         self.slider1_value.setText(f"{value}%")
@@ -762,6 +798,26 @@ class MainWindow(QMainWindow):
     def update_alpha2_mask(self, value):
         self.slider2_value.setText(f"{value}%")
         self.viewer.set_alpha2_mask(value)
+
+    def on_smoothing_changed(self):
+        """Handle smoothing checkbox or slider change."""
+        enabled = self.smoothing_checkbox.isChecked()
+        self.smoothing_slider.setEnabled(enabled)
+        self.smoothing_value_label.setText(str(self.smoothing_slider.value()))
+
+    def apply_edge_smoothing(self, mask: np.ndarray) -> np.ndarray:
+        """Apply edge smoothing to mask if enabled."""
+        if not self.smoothing_checkbox.isChecked():
+            return mask
+
+        strength = self.smoothing_slider.value()
+        # Ensure kernel size is odd
+        kernel_size = strength * 2 + 1
+
+        # Apply Gaussian blur for smooth edges
+        smoothed = cv2.GaussianBlur(mask, (kernel_size, kernel_size), 0)
+
+        return smoothed
 
     def save_mask(self):
         if self.mask is None:
@@ -773,20 +829,57 @@ class MainWindow(QMainWindow):
         )
 
         if file_path:
+            # Apply edge smoothing if enabled
+            mask_to_save = self.apply_edge_smoothing(self.binary_mask.copy())
+
             # Save the binary mask with alpha channel
             # Create RGBA image with white foreground and alpha channel
-            h, w = self.binary_mask.shape
+            h, w = mask_to_save.shape
             rgba = np.zeros((h, w, 4), dtype=np.uint8)
             rgba[:, :, 0] = 255  # Red
             rgba[:, :, 1] = 255  # Green
             rgba[:, :, 2] = 255  # Blue
-            rgba[:, :, 3] = self.binary_mask  # Alpha
+            rgba[:, :, 3] = mask_to_save  # Alpha
 
             # Convert RGBA to BGRA for OpenCV
             bgra = cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA)
             cv2.imwrite(file_path, bgra)
 
             self.statusBar().showMessage(f"Mask saved to: {file_path}", 5000)
+
+    def save_image_with_mask_alpha(self):
+        """Save Image 2 with mask applied as alpha channel."""
+        if self.image2 is None or self.binary_mask is None:
+            QMessageBox.warning(self, "Error", "Image 2 and mask are required.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Image with Alpha", "image_with_mask.png",
+            "PNG Image (*.png);;All Files (*.*)"
+        )
+
+        if file_path:
+            # Resize mask to match image2 if needed
+            h, w = self.image2.shape[:2]
+            mask_h, mask_w = self.binary_mask.shape[:2]
+
+            if (h, w) != (mask_h, mask_w):
+                mask_resized = cv2.resize(self.binary_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+            else:
+                mask_resized = self.binary_mask.copy()
+
+            # Apply edge smoothing if enabled
+            mask_resized = self.apply_edge_smoothing(mask_resized)
+
+            # Create BGRA image (Image 2 RGB + Mask Alpha)
+            bgra = np.zeros((h, w, 4), dtype=np.uint8)
+            bgra[:, :, 0] = self.image2[:, :, 0]  # Blue
+            bgra[:, :, 1] = self.image2[:, :, 1]  # Green
+            bgra[:, :, 2] = self.image2[:, :, 2]  # Red
+            bgra[:, :, 3] = mask_resized  # Alpha from mask
+
+            cv2.imwrite(file_path, bgra)
+            self.statusBar().showMessage(f"Image with alpha saved to: {file_path}", 5000)
 
 
 def main():
