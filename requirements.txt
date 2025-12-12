@@ -1,3 +1,9 @@
 PyQt6>=6.6.0
 opencv-python>=4.8.0
 numpy>=1.24.0
+Pillow>=10.0.0
+torch>=2.0.0
+huggingface_hub>=0.20.0
+# SAM3: Install from source
+# git clone https://github.com/facebookresearch/sam3.git
+# cd sam3 && pip install -e .

@@ -4,9 +4,12 @@ import numpy as np
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QSlider, QPushButton, QFileDialog,
-                             QGroupBox, QSplitter)
-from PyQt6.QtCore import Qt, QRect, pyqtSignal
+                             QGroupBox, QSplitter, QLineEdit, QComboBox, QProgressBar,
+                             QMessageBox, QTabWidget, QDialog, QTextEdit)
+from PyQt6.QtCore import Qt, QRect, pyqtSignal, QThread
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QDragEnterEvent, QDropEvent
+
+from sam3_wrapper import get_sam3_wrapper, SAM3Wrapper
 
 
 class DropLabel(QLabel):
@@ -170,6 +173,44 @@ class ImageDiffViewer(QLabel):
         self.setPixmap(scaled_pixmap)
 
 
+class SAM3LoaderThread(QThread):
+    """Thread for loading SAM3 model without blocking UI."""
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, sam3_wrapper: SAM3Wrapper, use_gpu: bool = True):
+        super().__init__()
+        self.sam3_wrapper = sam3_wrapper
+        self.use_gpu = use_gpu
+
+    def run(self):
+        success, message = self.sam3_wrapper.load_model(
+            use_gpu=self.use_gpu,
+            progress_callback=lambda msg: self.progress.emit(msg)
+        )
+        self.finished.emit(success, message)
+
+
+class SAM3MaskThread(QThread):
+    """Thread for generating SAM3 masks without blocking UI."""
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(object, object, object, str)
+
+    def __init__(self, sam3_wrapper: SAM3Wrapper, image: np.ndarray, text_prompt: str, threshold: float):
+        super().__init__()
+        self.sam3_wrapper = sam3_wrapper
+        self.image = image
+        self.text_prompt = text_prompt
+        self.threshold = threshold
+
+    def run(self):
+        self.progress.emit(f"Generating mask for '{self.text_prompt}'...")
+        combined_mask, individual_masks, scores, message = self.sam3_wrapper.generate_mask_from_text(
+            self.image, self.text_prompt, self.threshold
+        )
+        self.finished.emit(combined_mask, individual_masks, scores, message)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -178,6 +219,10 @@ class MainWindow(QMainWindow):
         self.image1 = None
         self.image2 = None
         self.mask = None
+        self.sam3_mask = None
+        self.sam3_wrapper = get_sam3_wrapper()
+        self.loader_thread = None
+        self.mask_thread = None
 
         self.init_ui()
 
@@ -285,6 +330,94 @@ class MainWindow(QMainWindow):
         self.process_btn.setEnabled(False)
         left_layout.addWidget(self.process_btn)
 
+        # SAM3 Controls Group
+        sam3_group = QGroupBox("SAM3 Text Prompt Segmentation")
+        sam3_layout = QVBoxLayout()
+
+        # SAM3 Status label
+        self.sam3_status_label = QLabel("Status: Checking SAM3...")
+        sam3_layout.addWidget(self.sam3_status_label)
+
+        # GPU info label
+        self.gpu_info_label = QLabel("")
+        sam3_layout.addWidget(self.gpu_info_label)
+
+        # Load/Unload model buttons
+        model_btn_layout = QHBoxLayout()
+        self.load_model_btn = QPushButton("Load Model (GPU)")
+        self.load_model_btn.clicked.connect(lambda: self.load_sam3_model(use_gpu=True))
+        model_btn_layout.addWidget(self.load_model_btn)
+
+        self.load_model_cpu_btn = QPushButton("Load (CPU)")
+        self.load_model_cpu_btn.clicked.connect(lambda: self.load_sam3_model(use_gpu=False))
+        model_btn_layout.addWidget(self.load_model_cpu_btn)
+
+        self.unload_model_btn = QPushButton("Unload")
+        self.unload_model_btn.clicked.connect(self.unload_sam3_model)
+        self.unload_model_btn.setEnabled(False)
+        model_btn_layout.addWidget(self.unload_model_btn)
+        sam3_layout.addLayout(model_btn_layout)
+
+        # Install guide button
+        self.install_guide_btn = QPushButton("Show Install Guide")
+        self.install_guide_btn.clicked.connect(self.show_sam3_install_instructions)
+        self.install_guide_btn.setStyleSheet("background-color: #2196F3;")
+        sam3_layout.addWidget(self.install_guide_btn)
+
+        # Progress bar
+        self.sam3_progress = QProgressBar()
+        self.sam3_progress.setTextVisible(True)
+        self.sam3_progress.setRange(0, 0)  # Indeterminate
+        self.sam3_progress.hide()
+        sam3_layout.addWidget(self.sam3_progress)
+
+        # Text prompt input
+        prompt_layout = QHBoxLayout()
+        prompt_label = QLabel("Text Prompt:")
+        self.text_prompt_input = QLineEdit()
+        self.text_prompt_input.setPlaceholderText("e.g., cat, person, car (comma-separated)")
+        self.text_prompt_input.returnPressed.connect(self.generate_sam3_mask)
+        prompt_layout.addWidget(prompt_label)
+        prompt_layout.addWidget(self.text_prompt_input)
+        sam3_layout.addLayout(prompt_layout)
+
+        # Threshold slider
+        threshold_layout = QHBoxLayout()
+        threshold_label = QLabel("Threshold:")
+        self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
+        self.threshold_slider.setRange(0, 100)
+        self.threshold_slider.setValue(50)
+        self.threshold_value_label = QLabel("0.50")
+        self.threshold_slider.valueChanged.connect(
+            lambda v: self.threshold_value_label.setText(f"{v/100:.2f}")
+        )
+        threshold_layout.addWidget(threshold_label)
+        threshold_layout.addWidget(self.threshold_slider)
+        threshold_layout.addWidget(self.threshold_value_label)
+        sam3_layout.addLayout(threshold_layout)
+
+        # Target image selector
+        target_layout = QHBoxLayout()
+        target_label = QLabel("Apply to:")
+        self.target_image_combo = QComboBox()
+        self.target_image_combo.addItems(["Image 1", "Image 2"])
+        target_layout.addWidget(target_label)
+        target_layout.addWidget(self.target_image_combo)
+        sam3_layout.addLayout(target_layout)
+
+        # Generate SAM3 mask button
+        self.sam3_generate_btn = QPushButton("Generate SAM3 Mask")
+        self.sam3_generate_btn.clicked.connect(self.generate_sam3_mask)
+        self.sam3_generate_btn.setEnabled(False)
+        sam3_layout.addWidget(self.sam3_generate_btn)
+
+        # SAM3 result label
+        self.sam3_result_label = QLabel("")
+        sam3_layout.addWidget(self.sam3_result_label)
+
+        sam3_group.setLayout(sam3_layout)
+        left_layout.addWidget(sam3_group)
+
         # Transparency controls
         controls_group = QGroupBox("Layer Transparency Controls")
         controls_layout = QVBoxLayout()
@@ -343,6 +476,210 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(left_panel)
         main_layout.addWidget(right_panel, stretch=1)
 
+        # Initialize SAM3 status
+        self.init_sam3_status()
+
+    def init_sam3_status(self):
+        """Initialize SAM3 status and update UI accordingly."""
+        if self.sam3_wrapper.is_sam3_available():
+            self.sam3_status_label.setText("Status: SAM3 available (model not loaded)")
+            gpu_available, gpu_info = self.sam3_wrapper.check_gpu_available()
+            self.gpu_info_label.setText(gpu_info)
+            if not gpu_available:
+                self.load_model_btn.setEnabled(False)
+        else:
+            error_msg = self.sam3_wrapper.get_import_error()
+            if error_msg:
+                self.sam3_status_label.setText(f"Status: SAM3 not installed\n({error_msg[:50]}...)")
+            else:
+                self.sam3_status_label.setText("Status: SAM3 not installed")
+            self.sam3_status_label.setStyleSheet("color: #ff6666;")
+            self.load_model_btn.setEnabled(False)
+            self.load_model_cpu_btn.setEnabled(False)
+            self.sam3_generate_btn.setEnabled(False)
+            self.gpu_info_label.setText("Click 'Show Install Guide' for setup instructions")
+
+    def show_sam3_install_instructions(self):
+        """Show SAM3 installation instructions in a dialog."""
+        instructions = self.sam3_wrapper.get_installation_instructions()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("SAM3 Installation Guide")
+        dialog.setMinimumSize(600, 500)
+
+        layout = QVBoxLayout(dialog)
+
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setPlainText(instructions)
+        text_edit.setStyleSheet("""
+            QTextEdit {
+                background-color: #2b2b2b;
+                color: #ffffff;
+                font-family: Consolas, Monaco, monospace;
+                font-size: 12px;
+                padding: 10px;
+            }
+        """)
+        layout.addWidget(text_edit)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.exec()
+
+    def load_sam3_model(self, use_gpu: bool = True):
+        """Load SAM3 model in a background thread."""
+        if self.loader_thread is not None and self.loader_thread.isRunning():
+            return
+
+        # Disable buttons during loading
+        self.load_model_btn.setEnabled(False)
+        self.load_model_cpu_btn.setEnabled(False)
+        self.sam3_progress.show()
+        self.sam3_status_label.setText("Status: Loading model...")
+
+        # Create and start loader thread
+        self.loader_thread = SAM3LoaderThread(self.sam3_wrapper, use_gpu)
+        self.loader_thread.progress.connect(self.on_sam3_load_progress)
+        self.loader_thread.finished.connect(self.on_sam3_load_finished)
+        self.loader_thread.start()
+
+    def on_sam3_load_progress(self, message: str):
+        """Handle SAM3 loading progress updates."""
+        self.sam3_status_label.setText(f"Status: {message}")
+
+    def on_sam3_load_finished(self, success: bool, message: str):
+        """Handle SAM3 loading completion."""
+        self.sam3_progress.hide()
+
+        if success:
+            self.sam3_status_label.setText(f"Status: Model loaded")
+            self.sam3_status_label.setStyleSheet("color: #66ff66;")
+            self.unload_model_btn.setEnabled(True)
+            self.update_sam3_generate_button()
+        else:
+            self.sam3_status_label.setText(f"Status: {message}")
+            self.sam3_status_label.setStyleSheet("color: #ff6666;")
+            self.load_model_btn.setEnabled(True)
+            self.load_model_cpu_btn.setEnabled(True)
+
+            # Show detailed error message
+            QMessageBox.warning(self, "SAM3 Load Error", message)
+
+    def unload_sam3_model(self):
+        """Unload SAM3 model to free memory."""
+        self.sam3_wrapper.unload_model()
+        self.sam3_status_label.setText("Status: Model unloaded")
+        self.sam3_status_label.setStyleSheet("color: #ffffff;")
+        self.load_model_btn.setEnabled(True)
+        self.load_model_cpu_btn.setEnabled(True)
+        self.unload_model_btn.setEnabled(False)
+        self.sam3_generate_btn.setEnabled(False)
+
+    def update_sam3_generate_button(self):
+        """Update SAM3 generate button enabled state."""
+        has_image = self.image1 is not None or self.image2 is not None
+        model_loaded = self.sam3_wrapper.is_model_loaded()
+        self.sam3_generate_btn.setEnabled(has_image and model_loaded)
+
+    def generate_sam3_mask(self):
+        """Generate mask using SAM3 with text prompt."""
+        if self.mask_thread is not None and self.mask_thread.isRunning():
+            return
+
+        # Get text prompt
+        text_prompt = self.text_prompt_input.text().strip()
+        if not text_prompt:
+            QMessageBox.warning(self, "Input Error", "Please enter a text prompt.")
+            return
+
+        # Get target image
+        target_idx = self.target_image_combo.currentIndex()
+        if target_idx == 0:
+            target_image = self.image1
+        else:
+            target_image = self.image2
+
+        if target_image is None:
+            QMessageBox.warning(self, "Input Error", "Please load the target image first.")
+            return
+
+        if not self.sam3_wrapper.is_model_loaded():
+            QMessageBox.warning(self, "Model Error", "Please load the SAM3 model first.")
+            return
+
+        # Get threshold
+        threshold = self.threshold_slider.value() / 100.0
+
+        # Disable generate button and show progress
+        self.sam3_generate_btn.setEnabled(False)
+        self.sam3_progress.show()
+        self.sam3_result_label.setText("Generating mask...")
+
+        # Create and start mask generation thread
+        self.mask_thread = SAM3MaskThread(
+            self.sam3_wrapper, target_image, text_prompt, threshold
+        )
+        self.mask_thread.progress.connect(self.on_sam3_mask_progress)
+        self.mask_thread.finished.connect(self.on_sam3_mask_finished)
+        self.mask_thread.start()
+
+    def on_sam3_mask_progress(self, message: str):
+        """Handle SAM3 mask generation progress."""
+        self.sam3_result_label.setText(message)
+
+    def on_sam3_mask_finished(self, combined_mask, individual_masks, scores, message: str):
+        """Handle SAM3 mask generation completion."""
+        self.sam3_progress.hide()
+        self.sam3_generate_btn.setEnabled(True)
+        self.sam3_result_label.setText(message)
+
+        if combined_mask is None:
+            return
+
+        # Store the SAM3 mask
+        self.sam3_mask = combined_mask
+
+        # Get target image for display
+        target_idx = self.target_image_combo.currentIndex()
+        if target_idx == 0:
+            target_image = self.image1
+        else:
+            target_image = self.image2
+
+        # Create colored mask (green for SAM3 segmentation)
+        h, w = target_image.shape[:2]
+        mask_resized = cv2.resize(combined_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+
+        colored_mask = np.zeros((h, w, 3), dtype=np.uint8)
+        colored_mask[:, :, 1] = mask_resized  # Green channel
+
+        self.mask = colored_mask
+        self.binary_mask = mask_resized
+
+        # If we have both images, show layered view
+        if self.image1 is not None and self.image2 is not None:
+            h1, w1 = self.image1.shape[:2]
+            h2, w2 = self.image2.shape[:2]
+            target_h = max(h1, h2)
+            target_w = max(w1, w2)
+
+            img1_resized = cv2.resize(self.image1, (target_w, target_h))
+            img2_resized = cv2.resize(self.image2, (target_w, target_h))
+            mask_display = cv2.resize(colored_mask, (target_w, target_h))
+
+            self.viewer.set_images(img1_resized, img2_resized, mask_display)
+        else:
+            # Show single image with mask overlay
+            overlay = self.sam3_wrapper.overlay_mask_on_image(
+                target_image, mask_resized, color=(0, 255, 0), alpha=0.5
+            )
+            self.viewer.display_image(overlay)
+
+        self.save_btn.setEnabled(True)
+
     def browse_image1(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Image 1", "",
@@ -365,6 +702,7 @@ class MainWindow(QMainWindow):
         if self.image1 is not None:
             self.drop_label1.load_thumbnail(file_path)
             self.check_ready_to_process()
+            self.update_sam3_generate_button()
 
     def load_image2(self, file_path):
         self.image2_path = file_path
@@ -372,6 +710,7 @@ class MainWindow(QMainWindow):
         if self.image2 is not None:
             self.drop_label2.load_thumbnail(file_path)
             self.check_ready_to_process()
+            self.update_sam3_generate_button()
 
     def check_ready_to_process(self):
         if self.image1 is not None and self.image2 is not None:
