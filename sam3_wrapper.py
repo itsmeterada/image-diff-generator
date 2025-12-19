@@ -6,6 +6,22 @@ Provides text prompt-based mask generation functionality.
 import os
 import sys
 
+# Disable MPS on macOS before importing torch to prevent device conflicts
+# SAM3 has compatibility issues with MPS
+if sys.platform == "darwin":
+    os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+
+def _disable_mps():
+    """Disable MPS backend after torch is imported."""
+    try:
+        import torch
+        if hasattr(torch.backends, 'mps'):
+            # Force MPS to report as unavailable
+            torch.backends.mps.is_available = lambda: False
+            torch.backends.mps.is_built = lambda: False
+    except ImportError:
+        pass
+
 # Setup triton mock BEFORE importing anything else (especially torch)
 def _setup_triton_mock():
     """Create a mock triton module for Windows/macOS compatibility."""
@@ -186,6 +202,7 @@ IMPORTANT: SAM3 requires Python 3.12 (not 3.13+)
     def check_gpu_available(self) -> Tuple[bool, str]:
         """
         Check if GPU (CUDA) is available.
+        Note: MPS is disabled on macOS due to SAM3 compatibility issues.
 
         Returns:
             Tuple of (is_available, device_info)
@@ -197,7 +214,9 @@ IMPORTANT: SAM3 requires Python 3.12 (not 3.13+)
                 memory_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
                 return True, f"GPU: {device_name} ({memory_total:.1f} GB)"
             else:
-                return False, "CUDA not available. Using CPU."
+                if sys.platform == "darwin":
+                    return False, "macOS: CPU only (MPS disabled for SAM3)"
+                return False, "GPU not available. Using CPU."
         except ImportError:
             return False, "PyTorch not installed."
 
@@ -252,13 +271,23 @@ IMPORTANT: SAM3 requires Python 3.12 (not 3.13+)
 
         try:
             import torch
+
+            # Disable MPS on macOS to prevent device conflicts
+            if sys.platform == "darwin":
+                _disable_mps()
+                # Force all tensor operations to use CPU by default
+                if hasattr(torch, 'set_default_device'):
+                    torch.set_default_device('cpu')
+                # Also set default tensor type to CPU
+                torch.set_default_tensor_type(torch.FloatTensor)
+
             from sam3.model_builder import build_sam3_image_model
             from sam3.model.sam3_image_processor import Sam3Processor
 
             if progress_callback:
                 progress_callback("Determining device...")
 
-            # Determine device
+            # Determine device (MPS is disabled on macOS due to SAM3 compatibility issues)
             if use_gpu and torch.cuda.is_available():
                 self.device = "cuda"
                 device_info = f"GPU: {torch.cuda.get_device_name(0)}"
@@ -269,18 +298,14 @@ IMPORTANT: SAM3 requires Python 3.12 (not 3.13+)
             if progress_callback:
                 progress_callback(f"Loading SAM3 model on {device_info}...")
 
-            # Build and load the model
-            self.model = build_sam3_image_model()
-
-            # Move model to device
-            if self.device == "cuda":
-                self.model = self.model.cuda()
+            # Build and load the model with explicit device
+            self.model = build_sam3_image_model(device=self.device)
 
             if progress_callback:
                 progress_callback("Creating processor...")
 
-            # Create processor
-            self.processor = Sam3Processor(self.model)
+            # Create processor with explicit device
+            self.processor = Sam3Processor(self.model, device=self.device)
 
             if progress_callback:
                 progress_callback("Model loaded successfully!")
@@ -426,6 +451,8 @@ IMPORTANT: SAM3 requires Python 3.12 (not 3.13+)
             return combined_mask, all_individual_masks, all_filtered_scores, message
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()  # Print full traceback to terminal
             return None, None, None, f"Error generating mask: {str(e)}"
 
     def create_colored_mask(

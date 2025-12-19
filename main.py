@@ -1,4 +1,23 @@
 import sys
+import os
+
+# Disable MPS on macOS before importing torch (via sam3_wrapper)
+# SAM3 has compatibility issues with MPS
+if sys.platform == "darwin":
+    os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+    # Import torch early and disable MPS completely
+    try:
+        import torch
+        if hasattr(torch.backends, 'mps'):
+            torch.backends.mps.is_available = lambda: False
+            torch.backends.mps.is_built = lambda: False
+        # Force CPU as default device
+        if hasattr(torch, 'set_default_device'):
+            torch.set_default_device('cpu')
+        torch.set_default_tensor_type(torch.FloatTensor)
+    except ImportError:
+        pass
+
 import cv2
 import numpy as np
 from pathlib import Path
@@ -35,7 +54,7 @@ class DropLabel(QLabel):
                 background-color: #f0f8f0;
             }
         """)
-        self.setMinimumSize(300, 200)
+        self.setMinimumSize(150, 100)
         self.setScaledContents(False)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
@@ -228,7 +247,7 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle("Image Difference Generator")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 50, 1100, 700)
 
         # Set modern dark theme
         self.setStyleSheet("""
@@ -296,69 +315,102 @@ class MainWindow(QMainWindow):
         # Left panel for inputs
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_panel.setMaximumWidth(400)
+        left_panel.setMaximumWidth(420)
+
+        # Images group - side by side layout
+        images_group = QGroupBox("Input Images")
+        images_outer_layout = QVBoxLayout()
+        images_layout = QHBoxLayout()
 
         # Image 1 drop zone
-        img1_group = QGroupBox("Image 1 (Base)")
-        img1_layout = QVBoxLayout()
-        self.drop_label1 = DropLabel("Drag and drop\nImage 1 here")
+        img1_widget = QWidget()
+        img1_layout = QVBoxLayout(img1_widget)
+        img1_layout.setContentsMargins(0, 0, 0, 0)
+        img1_label = QLabel("Image 1 (Base)")
+        img1_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.drop_label1 = DropLabel("Drop Image 1")
         self.drop_label1.image_dropped.connect(self.load_image1)
-        img1_layout.addWidget(self.drop_label1)
-
         browse_btn1 = QPushButton("Browse...")
         browse_btn1.clicked.connect(self.browse_image1)
+        browse_btn1.setMinimumWidth(60)
+        img1_layout.addWidget(img1_label)
+        img1_layout.addWidget(self.drop_label1)
         img1_layout.addWidget(browse_btn1)
-        img1_group.setLayout(img1_layout)
-        left_layout.addWidget(img1_group)
+        images_layout.addWidget(img1_widget)
 
         # Image 2 drop zone
-        img2_group = QGroupBox("Image 2 (Compare)")
-        img2_layout = QVBoxLayout()
-        self.drop_label2 = DropLabel("Drag and drop\nImage 2 here")
+        img2_widget = QWidget()
+        img2_layout = QVBoxLayout(img2_widget)
+        img2_layout.setContentsMargins(0, 0, 0, 0)
+        img2_label = QLabel("Image 2 (Compare)")
+        img2_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.drop_label2 = DropLabel("Drop Image 2")
         self.drop_label2.image_dropped.connect(self.load_image2)
-        img2_layout.addWidget(self.drop_label2)
-
         browse_btn2 = QPushButton("Browse...")
         browse_btn2.clicked.connect(self.browse_image2)
+        browse_btn2.setMinimumWidth(60)
+        img2_layout.addWidget(img2_label)
+        img2_layout.addWidget(self.drop_label2)
         img2_layout.addWidget(browse_btn2)
-        img2_group.setLayout(img2_layout)
-        left_layout.addWidget(img2_group)
+        images_layout.addWidget(img2_widget)
+
+        images_outer_layout.addLayout(images_layout)
 
         # Process button
         self.process_btn = QPushButton("Generate Difference Mask")
         self.process_btn.clicked.connect(self.process_images)
         self.process_btn.setEnabled(False)
-        left_layout.addWidget(self.process_btn)
+        images_outer_layout.addWidget(self.process_btn)
 
-        # SAM3 Controls Group
-        sam3_group = QGroupBox("SAM3 Text Prompt Segmentation")
-        sam3_layout = QVBoxLayout()
+        images_group.setLayout(images_outer_layout)
+        left_layout.addWidget(images_group)
 
-        # SAM3 Status label
-        self.sam3_status_label = QLabel("Status: Checking SAM3...")
-        sam3_layout.addWidget(self.sam3_status_label)
+        # Tab widget for controls
+        controls_tab = QTabWidget()
+        controls_tab.setStyleSheet("""
+            QTabWidget::pane { border: 1px solid #555; background-color: #2b2b2b; }
+            QTabBar::tab { background-color: #3a3a3a; color: #fff; padding: 6px 12px; margin-right: 2px; }
+            QTabBar::tab:selected { background-color: #4CAF50; }
+        """)
 
-        # GPU info label
+        # SAM3 Tab
+        sam3_widget = QWidget()
+        sam3_layout = QVBoxLayout(sam3_widget)
+        sam3_layout.setContentsMargins(5, 5, 5, 5)
+        sam3_layout.setSpacing(4)
+
+        # SAM3 Status and GPU info in one row
+        status_layout = QHBoxLayout()
+        self.sam3_status_label = QLabel("Checking SAM3...")
+        self.sam3_status_label.setWordWrap(True)
+        self.sam3_status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        status_layout.addWidget(self.sam3_status_label)
+        sam3_layout.addLayout(status_layout)
+
         self.gpu_info_label = QLabel("")
+        self.gpu_info_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         sam3_layout.addWidget(self.gpu_info_label)
 
         # Load/Unload model buttons
         model_btn_layout = QHBoxLayout()
-        self.load_model_btn = QPushButton("Load Model (GPU)")
+        self.load_model_btn = QPushButton("GPU")
         self.load_model_btn.clicked.connect(lambda: self.load_sam3_model(use_gpu=True))
+        self.load_model_btn.setMinimumWidth(50)
         model_btn_layout.addWidget(self.load_model_btn)
 
-        self.load_model_cpu_btn = QPushButton("Load (CPU)")
+        self.load_model_cpu_btn = QPushButton("CPU")
         self.load_model_cpu_btn.clicked.connect(lambda: self.load_sam3_model(use_gpu=False))
+        self.load_model_cpu_btn.setMinimumWidth(50)
         model_btn_layout.addWidget(self.load_model_cpu_btn)
 
         self.unload_model_btn = QPushButton("Unload")
         self.unload_model_btn.clicked.connect(self.unload_sam3_model)
         self.unload_model_btn.setEnabled(False)
+        self.unload_model_btn.setMinimumWidth(50)
         model_btn_layout.addWidget(self.unload_model_btn)
         sam3_layout.addLayout(model_btn_layout)
 
-        # Install guide button (hidden by default, shown only when SAM3 not installed)
+        # Install guide button
         self.install_guide_btn = QPushButton("Show Install Guide")
         self.install_guide_btn.clicked.connect(self.show_sam3_install_instructions)
         self.install_guide_btn.setStyleSheet("background-color: #2196F3;")
@@ -368,24 +420,24 @@ class MainWindow(QMainWindow):
         # Progress bar
         self.sam3_progress = QProgressBar()
         self.sam3_progress.setTextVisible(True)
-        self.sam3_progress.setRange(0, 0)  # Indeterminate
+        self.sam3_progress.setRange(0, 0)
         self.sam3_progress.hide()
         sam3_layout.addWidget(self.sam3_progress)
 
         # Text prompt input
         prompt_layout = QHBoxLayout()
-        prompt_label = QLabel("Text Prompt:")
+        prompt_label = QLabel("Prompt:")
         self.text_prompt_input = QLineEdit()
         self.text_prompt_input.setText("people, people shadow")
-        self.text_prompt_input.setPlaceholderText("e.g., cat, person, car (comma-separated)")
+        self.text_prompt_input.setPlaceholderText("e.g., cat, person")
         self.text_prompt_input.returnPressed.connect(self.generate_sam3_mask)
         prompt_layout.addWidget(prompt_label)
         prompt_layout.addWidget(self.text_prompt_input)
         sam3_layout.addLayout(prompt_layout)
 
-        # Threshold slider
-        threshold_layout = QHBoxLayout()
-        threshold_label = QLabel("Threshold:")
+        # Threshold and Target in one row
+        options_layout = QHBoxLayout()
+        threshold_label = QLabel("Thresh:")
         self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
         self.threshold_slider.setRange(0, 100)
         self.threshold_slider.setValue(50)
@@ -393,17 +445,16 @@ class MainWindow(QMainWindow):
         self.threshold_slider.valueChanged.connect(
             lambda v: self.threshold_value_label.setText(f"{v/100:.2f}")
         )
-        threshold_layout.addWidget(threshold_label)
-        threshold_layout.addWidget(self.threshold_slider)
-        threshold_layout.addWidget(self.threshold_value_label)
-        sam3_layout.addLayout(threshold_layout)
+        options_layout.addWidget(threshold_label)
+        options_layout.addWidget(self.threshold_slider)
+        options_layout.addWidget(self.threshold_value_label)
+        sam3_layout.addLayout(options_layout)
 
-        # Target image selector
         target_layout = QHBoxLayout()
         target_label = QLabel("Apply to:")
         self.target_image_combo = QComboBox()
         self.target_image_combo.addItems(["Image 1", "Image 2"])
-        self.target_image_combo.setCurrentIndex(1)  # Default to Image 2
+        self.target_image_combo.setCurrentIndex(1)
         target_layout.addWidget(target_label)
         target_layout.addWidget(self.target_image_combo)
         sam3_layout.addLayout(target_layout)
@@ -416,55 +467,59 @@ class MainWindow(QMainWindow):
 
         # SAM3 result label
         self.sam3_result_label = QLabel("")
+        self.sam3_result_label.setWordWrap(True)
+        self.sam3_result_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         sam3_layout.addWidget(self.sam3_result_label)
 
-        sam3_group.setLayout(sam3_layout)
-        left_layout.addWidget(sam3_group)
+        sam3_layout.addStretch()
+        controls_tab.addTab(sam3_widget, "SAM3")
+
+        # Display Settings Tab (Transparency + Smoothing)
+        display_widget = QWidget()
+        display_layout = QVBoxLayout(display_widget)
+        display_layout.setContentsMargins(5, 5, 5, 5)
+        display_layout.setSpacing(4)
 
         # Transparency controls
-        controls_group = QGroupBox("Layer Transparency Controls")
-        controls_layout = QVBoxLayout()
+        trans_label = QLabel("Layer Transparency")
+        trans_label.setStyleSheet("font-weight: bold;")
+        display_layout.addWidget(trans_label)
 
         # Slider for Image1 <-> Image2
-        slider1_label = QLabel("Image 1 ⟷ Image 2")
+        slider1_layout = QHBoxLayout()
+        slider1_label = QLabel("Img1⟷Img2:")
         self.slider1 = QSlider(Qt.Orientation.Horizontal)
         self.slider1.setRange(0, 100)
         self.slider1.setValue(100)
         self.slider1.valueChanged.connect(self.update_alpha1_2)
         self.slider1_value = QLabel("100%")
-
-        slider1_layout = QVBoxLayout()
         slider1_layout.addWidget(slider1_label)
         slider1_layout.addWidget(self.slider1)
-        slider1_layout.addWidget(self.slider1_value, alignment=Qt.AlignmentFlag.AlignCenter)
-        controls_layout.addLayout(slider1_layout)
+        slider1_layout.addWidget(self.slider1_value)
+        display_layout.addLayout(slider1_layout)
 
         # Slider for Image2 <-> Mask
-        slider2_label = QLabel("Image 2 ⟷ Mask")
+        slider2_layout = QHBoxLayout()
+        slider2_label = QLabel("Img2⟷Mask:")
         self.slider2 = QSlider(Qt.Orientation.Horizontal)
         self.slider2.setRange(0, 100)
         self.slider2.setValue(100)
         self.slider2.valueChanged.connect(self.update_alpha2_mask)
         self.slider2_value = QLabel("100%")
-
-        slider2_layout = QVBoxLayout()
         slider2_layout.addWidget(slider2_label)
         slider2_layout.addWidget(self.slider2)
-        slider2_layout.addWidget(self.slider2_value, alignment=Qt.AlignmentFlag.AlignCenter)
-        controls_layout.addLayout(slider2_layout)
-
-        controls_group.setLayout(controls_layout)
-        left_layout.addWidget(controls_group)
+        slider2_layout.addWidget(self.slider2_value)
+        display_layout.addLayout(slider2_layout)
 
         # Edge smoothing controls
-        smoothing_group = QGroupBox("Mask Edge Smoothing")
-        smoothing_layout = QVBoxLayout()
+        smooth_label = QLabel("Mask Edge Smoothing")
+        smooth_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        display_layout.addWidget(smooth_label)
 
         self.smoothing_checkbox = QCheckBox("Enable Edge Smoothing")
         self.smoothing_checkbox.setChecked(False)
-        self.smoothing_checkbox.setStyleSheet("QCheckBox { color: #ffffff; font-weight: bold; }")
         self.smoothing_checkbox.stateChanged.connect(self.on_smoothing_changed)
-        smoothing_layout.addWidget(self.smoothing_checkbox)
+        display_layout.addWidget(self.smoothing_checkbox)
 
         smooth_strength_layout = QHBoxLayout()
         smooth_strength_label = QLabel("Strength:")
@@ -477,27 +532,27 @@ class MainWindow(QMainWindow):
         smooth_strength_layout.addWidget(smooth_strength_label)
         smooth_strength_layout.addWidget(self.smoothing_slider)
         smooth_strength_layout.addWidget(self.smoothing_value_label)
-        smoothing_layout.addLayout(smooth_strength_layout)
+        display_layout.addLayout(smooth_strength_layout)
 
-        smoothing_group.setLayout(smoothing_layout)
-        left_layout.addWidget(smoothing_group)
+        display_layout.addStretch()
+        controls_tab.addTab(display_widget, "Display")
+
+        left_layout.addWidget(controls_tab)
 
         # Save buttons
-        save_btn_layout = QVBoxLayout()
+        save_btn_layout = QHBoxLayout()
 
-        self.save_btn = QPushButton("Save Mask Image")
+        self.save_btn = QPushButton("Save Mask")
         self.save_btn.clicked.connect(self.save_mask)
         self.save_btn.setEnabled(False)
         save_btn_layout.addWidget(self.save_btn)
 
-        self.save_with_alpha_btn = QPushButton("Save Image 2 with Mask Alpha")
+        self.save_with_alpha_btn = QPushButton("Save with Alpha")
         self.save_with_alpha_btn.clicked.connect(self.save_image_with_mask_alpha)
         self.save_with_alpha_btn.setEnabled(False)
         save_btn_layout.addWidget(self.save_with_alpha_btn)
 
         left_layout.addLayout(save_btn_layout)
-
-        left_layout.addStretch()
 
         # Right panel for display
         right_panel = QWidget()
