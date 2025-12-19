@@ -8,8 +8,8 @@ import sys
 
 # Setup triton mock BEFORE importing anything else (especially torch)
 def _setup_triton_mock():
-    """Create a mock triton module for Windows compatibility."""
-    if sys.platform == "win32" and "triton" not in sys.modules:
+    """Create a mock triton module for Windows/macOS compatibility."""
+    if sys.platform in ("win32", "darwin") and "triton" not in sys.modules:
         import types
         from importlib.machinery import ModuleSpec
 

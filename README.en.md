@@ -176,7 +176,7 @@ python main.py
    - Detection results will be displayed in the preview
 
 6. **Adjust threshold** (optional):
-   - Use the Threshold slider to adjust detection sensitivity (0.0-1.0)
+   - Use the Threshold slider to adjust detection sensitivity (0.0-1.0, default: 0.50)
    - Lower values detect more objects, higher values only detect high-confidence matches
 
 ### Use Cases
@@ -256,7 +256,7 @@ image-diff-generator/
 - Wrapper class for SAM3 model
 - Model loading/unloading functionality
 - Text prompt-based mask generation
-- Windows triton compatibility support
+- Windows/macOS triton compatibility support
 
 ## Customization
 
